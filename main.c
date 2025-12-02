@@ -1,7 +1,8 @@
-#include <stdio.h>
+ï»¿#include <stdio.h>
 #include <conio.h>
 #include <windows.h>
 #include <time.h>
+#include <stdlib.h>
 
 typedef struct {
     int x;
@@ -13,19 +14,48 @@ typedef struct {
     int farm;
     int pig, cow, chicken;
     int meat_pig, meat_cow, meat_chicken;
+    int ticket_sea;
 } Player;
 
-Player player = { 5,0,0,0,0,0,0,0,0,0,0,0 };
+Player player = { 5,0,0,0,0,0,0,0,0,0,0,0,0 };
 
-int shopX = 12;
-int caveX = 35;
-int homeX = 20;
-int farmX = 28;
+int shopX = 15;
+int caveX = 40;
+int homeX = 5;
+int farmX = 30;
+int trainX = 60;
 
 time_t lastOreTime;
+time_t lastHungerTime;
+time_t lastFatigueTime;
+time_t lastTimeWeatherChange;
 
 HANDLE hConsole;
 COORD cursorPos;
+
+enum Weather { SUNNY, RAIN, SNOW };
+enum Weather weather = SUNNY;
+int daytime = 1;
+
+const char* saveFile = "savegame.dat";
+
+void saveGame() {
+    FILE* fp = fopen(saveFile, "wb");
+    if (!fp) return;
+    fwrite(&player, sizeof(Player), 1, fp);
+    fwrite(&daytime, sizeof(int), 1, fp);
+    fwrite(&weather, sizeof(enum Weather), 1, fp);
+    fclose(fp);
+}
+
+void loadGame() {
+    FILE* fp = fopen(saveFile, "rb");
+    if (!fp) return;
+    fread(&player, sizeof(Player), 1, fp);
+    fread(&daytime, sizeof(int), 1, fp);
+    fread(&weather, sizeof(enum Weather), 1, fp);
+    fclose(fp);
+}
 
 void gotoxy(int x, int y) {
     cursorPos.X = x;
@@ -33,151 +63,359 @@ void gotoxy(int x, int y) {
     SetConsoleCursorPosition(hConsole, cursorPos);
 }
 
+void clearScreen() {
+    system("cls");
+}
+
 void printStatus() {
     gotoxy(0, 0);
-    printf("ÇÇ·Îµµ:%d  ¹è°íÇÄ:%d  µ·:%d  ±¤¼®:%d    ",
+    printf("í”¼ë¡œë„:%d  ë°°ê³ í””:%d  ëˆ:%d  ê´‘ì„:%d    ",
         player.fatigue, player.hunger, player.money, player.ore);
 
     gotoxy(0, 1);
-    printf("µÅÁö:%d ¼Ò:%d ´ß:%d | µÅÁö°í±â:%d ¼Ò°í±â:%d ´ß°í±â:%d      ",
+    printf("ë¼ì§€:%d ì†Œ:%d ë‹­:%d | ë¼ì§€ê³ ê¸°:%d ì†Œê³ ê¸°:%d ë‹­ê³ ê¸°:%d | í‹°ì¼“:%d     ",
         player.pig, player.cow, player.chicken,
-        player.meat_pig, player.meat_cow, player.meat_chicken);
+        player.meat_pig, player.meat_cow, player.meat_chicken,
+        player.ticket_sea);
+
+    gotoxy(0, 2);
+    char* weatherStr = (weather == SUNNY) ? "ë§‘ìŒ" : (weather == RAIN) ? "ë¹„" : "ëˆˆ";
+    printf("ë‚ ì”¨: %s", weatherStr);
+
+    gotoxy(50, 2);
+    if (daytime) printf("ì‹œê°„: ë‚® ");
+    else printf("ì‹œê°„: ë°¤ ");
 }
 
 void printMap() {
     gotoxy(0, 3);
-    printf("------------------------------------------------\n");
+    printf("-----------------------------------------------------------\n");
     printf("\n");
-    printf("            ***********          *\n");
-    printf("            *  SHOP  *          *\n");
-    printf("            *  *  *  *          *\n");
-    printf("            ***********        *\n");
-    printf("               (»óÁ¡)      (µ¿±¼)\n");
+    printf("             **********                   *                *\n");
+    printf("             *  SHOP  *                  *                 *\n");
+    printf("             *  *  *  *                 *                  *\n");
+    printf("             **********               *                    *\n");
+    printf("               (ìƒì )                  (ë™êµ´)           (ê¸°ì°¨ì—­)\n");
     printf("\n");
-    printf("------------------------------------------------\n");
+    printf("-----------------------------------------------------------\n");
 }
 
-void giveOreIfInCave() {
-    if (player.x == caveX) {
-        time_t now = time(NULL);
-        if (now - lastOreTime >= 5) {
-            player.ore++;
-            lastOreTime = now;
-        }
+void printHouse() {
+    if (!player.home) return;
+    gotoxy(homeX - 5, 4);  printf("     *");
+    gotoxy(homeX - 5, 5);  printf(" *********");
+    gotoxy(homeX - 5, 6);  printf(" *       *");
+    gotoxy(homeX - 5, 7);  printf(" *       *");
+    gotoxy(homeX - 5, 8);  printf(" *********");
+    gotoxy(homeX - 5, 9);  printf("   (ì§‘)");
+}
+
+void printFarm() {
+    if (!player.farm) return;
+    gotoxy(farmX - 6, 5);  printf(" ***********");
+    gotoxy(farmX - 6, 6);  printf(" *         *");
+    gotoxy(farmX - 6, 7);  printf(" *         *");
+    gotoxy(farmX - 6, 8);  printf(" ***********");
+    gotoxy(farmX - 6, 9);  printf("    (ë†ì¥)");
+}
+
+void printInteractionMessage() {
+    if (daytime && player.x >= shopX - 2 && player.x <= shopX + 2) {
+        gotoxy(shopX - 5, 15);
+        printf("Eë¥¼ ëˆŒëŸ¬ ìƒì  ë“¤ì–´ê°€ê¸°");
+    }
+
+    if (player.home && player.x >= homeX - 2 && player.x <= homeX + 2) {
+        gotoxy(homeX - 5, 15);
+        printf("Eë¥¼ ëˆŒëŸ¬ ì§‘ ë“¤ì–´ê°€ê¸°");
+    }
+
+    if (player.farm && player.x >= farmX - 2 && player.x <= farmX + 2) {
+        gotoxy(farmX - 5, 15);
+        printf("Eë¥¼ ëˆŒëŸ¬ ë†ì¥ ë“¤ì–´ê°€ê¸°");
+    }
+
+    if (player.x >= trainX - 2 && player.x <= trainX + 2) {
+        gotoxy(trainX - 5, 15);
+        if (player.ticket_sea) printf("Eë¥¼ ëˆŒëŸ¬ ê¸°ì°¨ íƒ‘ìŠ¹");
+        else printf("í‹°ì¼“ì´ í•„ìš”í•©ë‹ˆë‹¤!");
     }
 }
 
-// --------------------------
-// ¸Ş´º ÇÔ¼öµé
-// --------------------------
+void giveOreIfInCave() {
+    time_t now = time(NULL);
+    double interval;
+
+    if (weather == SUNNY) interval = 1.0;
+    else interval = 1.5; // RAIN, SNOW
+
+    // ë°¤ì´ë©´ 0.5ì´ˆ ê°ì†Œ
+    if (!daytime) interval -= 0.5;
+    if (interval < 0.1) interval = 0.1; // ìµœì†Œ ê°„ê²© ì œí•œ
+
+    if (player.x >= caveX - 2 && player.x <= caveX + 2 && now - lastOreTime >= interval) {
+        player.ore++;
+        lastOreTime = now;
+    }
+}
+
+
+void updateOreMessage() {
+    if (player.x >= caveX - 2 && player.x <= caveX + 2) {
+        gotoxy(0, 17);
+        printf("ê´‘ì„ì„ ì–»ê³  ìˆìŠµë‹ˆë‹¤!       ");
+    }
+    else {
+        gotoxy(0, 17);
+        printf("                           ");
+    }
+}
+
 void shopMenu() {
     system("cls");
     int sel;
-
     while (1) {
         printStatus();
-        printf("\n== SHOP ==\n1. ±¤¼®3 -> µ·1\n2. Áı ±¸¸Å(10¿ø)\n3. ³óÀå ±¸¸Å(15¿ø)\n4. °¡Ãà ±¸¸Å(40¿ø)\n5. °í±â ±Á±â\n0. ³ª°¡±â\n> ");
+        printf("\n== SHOP ==\n");
+        printf("1. ê´‘ì„3 -> ëˆ1\n");
+        printf("2. ì§‘ êµ¬ë§¤(10ì›)\n");
+        printf("3. ë†ì¥ êµ¬ë§¤(15ì›)\n");
+        printf("4. ê°€ì¶• êµ¬ë§¤(20ì›)\n");
+        printf("5. ê³ ê¸° êµ½ê¸°\n");
+        printf("6. ë°”ë‹¤ ê°€ëŠ” í‹°ì¼“ êµ¬ë§¤(100ì›)\n");
+        printf("0. ë‚˜ê°€ê¸°\n> ");
         scanf("%d", &sel);
 
         if (sel == 0) break;
 
-        if (sel == 1 && player.ore >= 3) { player.ore -= 3; player.money++; }
-        else if (sel == 2 && player.money >= 10) { player.money -= 10; player.home = 1; }
-        else if (sel == 3 && player.money >= 15) { player.money -= 15; player.farm = 1; }
-        else if (sel == 4 && player.money >= 40) {
+        if (sel == 1) {
+            if (player.ore >= 3) { player.ore -= 3; player.money++; }
+            else { printf("ê´‘ì„ì´ ë¶€ì¡±í•©ë‹ˆë‹¤!\n"); Sleep(1000); }
+        }
+        else if (sel == 2) {
+            if (player.home) { printf("ì´ë¯¸ ì§‘ì´ ìˆìŠµë‹ˆë‹¤!\n"); Sleep(1000); }
+            else if (player.money < 10) { printf("ëˆì´ ë¶€ì¡±í•©ë‹ˆë‹¤!\n"); Sleep(1000); }
+            else { player.money -= 10; player.home = 1; }
+        }
+        else if (sel == 3) {
+            if (player.farm) { printf("ì´ë¯¸ ë†ì¥ì´ ìˆìŠµë‹ˆë‹¤!\n"); Sleep(1000); }
+            else if (player.money < 15) { printf("ëˆì´ ë¶€ì¡±í•©ë‹ˆë‹¤!\n"); Sleep(1000); }
+            else { player.money -= 15; player.farm = 1; }
+        }
+        else if (sel == 4) {
+            if (!player.farm) {
+                printf("ë†ì¥ì„ ë¨¼ì € êµ¬ë§¤í•´ì•¼ í•©ë‹ˆë‹¤!\n");
+                Sleep(1000);
+                system("cls");
+                continue;
+            }
+            if (player.money < 20) {
+                printf("ëˆì´ ë¶€ì¡±í•©ë‹ˆë‹¤!\n");
+                Sleep(1000);
+                system("cls");
+                continue;
+            }
+
             int c;
-            printf("1. µÅÁö 2. ¼Ò 3. ´ß\n> ");
+            printf("1. ë¼ì§€ 2. ì†Œ 3. ë‹­\n> ");
             scanf("%d", &c);
+
             if (c == 1) player.pig++;
             else if (c == 2) player.cow++;
             else if (c == 3) player.chicken++;
-            player.money -= 40;
+
+            player.money -= 20;
         }
         else if (sel == 5) {
-            int c;
-            printf("1. µÅÁö°í±â 2. ¼Ò°í±â 3. ´ß°í±â\n> ");
-            scanf("%d", &c);
-            if (c == 1 && player.meat_pig > 0) { player.meat_pig--; player.hunger -= 10; }
-            else if (c == 2 && player.meat_cow > 0) { player.meat_cow--; player.hunger -= 10; }
-            else if (c == 3 && player.meat_chicken > 0) { player.meat_chicken--; player.hunger -= 10; }
-            else { printf("°í±â ¾øÀ½!\n"); Sleep(1000); }
-        }
-    }
+            int c; printf("1. ë¼ì§€ê³ ê¸° 2. ì†Œê³ ê¸° 3. ë‹­ê³ ê¸°\n> "); scanf("%d", &c);
 
-    system("cls");
+            if (player.hunger == 0) {
+                printf("ì´ë¯¸ ë°°ê³ í””ì´ 0ì…ë‹ˆë‹¤!\n");
+                Sleep(1000);
+                system("cls");
+                continue;
+            }
+
+            if (c == 1 && player.meat_pig > 0) { player.meat_pig--; player.hunger -= 10; if (player.hunger < 0)player.hunger = 0; }
+            else if (c == 2 && player.meat_cow > 0) { player.meat_cow--; player.hunger -= 10; if (player.hunger < 0)player.hunger = 0; }
+            else if (c == 3 && player.meat_chicken > 0) { player.meat_chicken--; player.hunger -= 10; if (player.hunger < 0)player.hunger = 0; }
+            else { printf("ê³ ê¸° ì—†ìŒ!\n"); Sleep(1000); }
+        }
+        system("cls");
+    }
 }
 
 void homeMenu() {
     system("cls");
-
     int sel;
     while (1) {
         printStatus();
-        printf("\n== Áı ==\n1. ÀáÀÚ±â (ÇÇ·Îµµ 0)\n0. ³ª°¡±â\n> ");
+        printf("\n== ì§‘ ==\n1. ì ìê¸° (í”¼ë¡œë„ 0)\n0. ë‚˜ê°€ê¸°\n> ");
         scanf("%d", &sel);
-
         if (sel == 1) { player.fatigue = 0; break; }
         if (sel == 0) break;
+        system("cls");
     }
-
-    system("cls");
 }
 
 void farmMenu() {
     system("cls");
-
     int sel;
     while (1) {
         printStatus();
-        printf("\n== ³óÀå ==\n1. µÅÁö°í±â ¾ò±â\n2. ¼Ò°í±â ¾ò±â\n3. ´ß°í±â ¾ò±â\n0. ³ª°¡±â\n> ");
+        printf("\n== ë†ì¥ ==\n1. ë¼ì§€ê³ ê¸° ì–»ê¸°\n2. ì†Œê³ ê¸° ì–»ê¸°\n3. ë‹­ê³ ê¸° ì–»ê¸°\n0. ë‚˜ê°€ê¸°\n> ");
         scanf("%d", &sel);
 
-        if (sel == 1) player.meat_pig++;
-        else if (sel == 2) player.meat_cow++;
-        else if (sel == 3) player.meat_chicken++;
+        if (sel == 1) {
+            if (player.pig > 0) { player.pig--; player.meat_pig++; }
+            else { printf("ë¼ì§€ê°€ ì—†ìŠµë‹ˆë‹¤!\n"); Sleep(1000); }
+        }
+        else if (sel == 2) {
+            if (player.cow > 0) { player.cow--; player.meat_cow++; }
+            else { printf("ì†Œê°€ ì—†ìŠµë‹ˆë‹¤!\n"); Sleep(1000); }
+        }
+        else if (sel == 3) {
+            if (player.chicken > 0) { player.chicken--; player.meat_chicken++; }
+            else { printf("ë‹­ì´ ì—†ìŠµë‹ˆë‹¤!\n"); Sleep(1000); }
+        }
         else if (sel == 0) break;
-    }
 
-    system("cls");
+        system("cls");
+    }
 }
 
-// --------------------------
-// ¸ŞÀÎ
-// --------------------------
+void printSeaScreen() {
+    system("cls");
+    printf("-----------------------------------------------------------\n\n");
+    printf("             ~~~~~~~~****~~~~~~~***~~~~~~~****~~~~~~~\n");
+    printf("             ***~~~~~~~****~~~~~~~***~~~~~~~****~~~~~\n");
+    printf("             ~~~~~****~~~~~~~****~~~~~~~****~~~~~~~**\n");
+    printf("             ***~~~~~~~****~~~~~~~***~~~~~~~****~~~~~\n");
+    printf("                           ( ë°”   ë‹¤ )\n");
+    printf("\n-----------------------------------------------------------\n");
+}
+
 int main() {
     hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     lastOreTime = time(NULL);
+    lastHungerTime = time(NULL);
+    lastFatigueTime = time(NULL);
+    lastTimeWeatherChange = time(NULL);
 
-    system("cls");
+    srand(time(NULL));
+    weather = rand() % 3;
+
+    loadGame();
+
+    clearScreen();
+    int redraw = 1;
 
     while (1) {
-        printStatus();
-        printMap();
+        time_t now = time(NULL);
+
+        if (now - lastTimeWeatherChange >= 60) {
+            daytime = !daytime;
+            weather = rand() % 3;
+            lastTimeWeatherChange = now;
+            redraw = 1;
+        }
+
+        // ë°°ê³ í”” ì‹œê°„ ê³„ì‚°
+        double hungerInterval = 5; // ë§‘ìŒ
+        if (weather == RAIN) hungerInterval = 4;
+        else if (weather == SNOW) hungerInterval = 4; // ëˆˆì€ 4ì´ˆ +1
+        if (now - lastHungerTime >= hungerInterval) {
+            player.hunger++;
+            lastHungerTime = now;
+            redraw = 1;
+        }
+
+        // í”¼ë¡œë„ ì‹œê°„ ê³„ì‚°
+        double fatigueInterval = 3; // ë§‘ìŒ
+        if (weather == RAIN) fatigueInterval = 2;
+        else if (weather == SNOW) fatigueInterval = 2; // ëˆˆì€ 2ì´ˆ +1
+        if (now - lastFatigueTime >= fatigueInterval) {
+            player.fatigue++;
+            lastFatigueTime = now;
+            redraw = 1;
+        }
+
         giveOreIfInCave();
 
-        gotoxy(player.x, 10);
-        printf("*");
+        if (player.hunger >= 100 || player.fatigue >= 100) {
+            clearScreen();
+            gotoxy(10, 10);
+            printf("===== GAME OVER =====");
+            Sleep(3000);
+            return 0;
+        }
 
-        // ¸ğµç Å° ¿©±â¼­¸¸ Ã³¸®
+        if (redraw) {
+            clearScreen();
+            printStatus();
+            printMap();
+            printHouse();
+            printFarm();
+            printInteractionMessage();
+            gotoxy(player.x, 10); printf("*");
+            redraw = 0;
+        }
+
+        updateOreMessage();
+
         if (kbhit()) {
             int key = getch();
+            redraw = 1;
 
-            // ¹æÇâÅ°
             if (key == 224) {
                 key = getch();
-                if (key == 75 && player.x > 0) player.x--;      // ¿ŞÂÊ
-                if (key == 77 && player.x < 50) player.x++;     // ¿À¸¥ÂÊ
+                if (key == 75 && player.x > 0) player.x--;
+                if (key == 77 && player.x < trainX) player.x++;
             }
-            // EÅ° »óÈ£ÀÛ¿ë
             else if (key == 'e' || key == 'E') {
-                if (player.x == shopX)       shopMenu();
-                else if (player.home && player.x == homeX)  homeMenu();
-                else if (player.farm && player.x == farmX)  farmMenu();
+                if (player.x >= shopX - 2 && player.x <= shopX + 2 && daytime)
+                    shopMenu();
+                else if (player.home && player.x >= homeX - 2 && player.x <= homeX + 2)
+                    homeMenu();
+                else if (player.farm && player.x >= farmX - 2 && player.x <= farmX + 2)
+                    farmMenu();
+                else if (player.x >= trainX - 2 && player.x <= trainX + 2 && player.ticket_sea) {
+                    player.ticket_sea = 0;
+                    printSeaScreen();
+                    Sleep(2000);
+                    gotoxy(0, 15);
+                    printf("ë°”ë‹¤ì— ë„ì°©í–ˆìŠµë‹ˆë‹¤!");
+                    Sleep(2000);
+                    gotoxy(0, 16);
+                    printf("===== GAME CLEAR =====");
+                    saveGame();
+                    Sleep(2000);
+                    return 0;
+                }
+            }
+            else if (key == 'q' || key == 'Q') {
+                saveGame();
+                clearScreen();
+                gotoxy(0, 10);
+                printf("ê²Œì„ ì €ì¥ í›„ ì¢…ë£Œí•©ë‹ˆë‹¤!\n");
+                Sleep(2000);
+                return 0;
+            }
+            else if (key == 'r' || key == 'R') {
+                player = (Player){ 5,0,0,0,0,0,0,0,0,0,0,0,0 };
+                daytime = 1;
+                weather = SUNNY;
+                lastOreTime = lastHungerTime = lastFatigueTime = lastTimeWeatherChange = time(NULL);
+                remove(saveFile);
+                clearScreen();
+                gotoxy(0, 0);
+                printf("ê²Œì„ì´ ì´ˆê¸°í™”ë˜ì—ˆìŠµë‹ˆë‹¤!\n");
+                Sleep(1000);
+                redraw = 1;
             }
         }
 
-        Sleep(50);
-        system("cls");
+        Sleep(10);
     }
 
     return 0;
